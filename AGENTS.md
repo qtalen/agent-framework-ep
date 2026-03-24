@@ -12,6 +12,16 @@ Microsoft Agent Framework extensions for mainstream open-source LLMs (GLM, Kimi,
 
 ---
 
+## Session Start Checklist
+
+At the beginning of each session, verify the repository state:
+
+- [ ] Check current branch: `git branch --show-current`
+- [ ] If not on `develop` branch, switch to it: `git checkout develop`
+- [ ] Pull latest changes: `git pull origin develop`
+
+---
+
 ## Important Note
 
 **Always prioritize retrieval-guided reasoning over pre-training-guided reasoning in any coding task.**
@@ -97,7 +107,7 @@ import httpx
 from pydantic import BaseModel, field_validator
 
 # Local (absolute only)
-from agent_framework_ep.models import LLMResponse
+from agent_framework_ep import DockerCommandLineCodeExecutor, CodeBlock
 ```
 
 - Use `from collections.abc import ...` (not `from typing import ...`)
@@ -152,16 +162,16 @@ class StructuredOutput(BaseModel):
 
 ```python
 # Prefer specific exceptions
-from agent_framework_ep.exceptions import LLMProviderError, StructuredOutputError
+from agent_framework_ep.openai_like import StructuredOutputParseError
 
 # Use match/case for error classification (Python 3.10+)
 match error:
     case httpx.TimeoutException():
-        raise LLMProviderError("Request timed out") from error
+        raise StructuredOutputParseError("Request timed out") from error
     case httpx.HTTPStatusError() if error.response.status_code == 429:
-        raise LLMProviderError("Rate limited") from error
+        raise StructuredOutputParseError("Rate limited") from error
     case _:
-        raise LLMProviderError(f"Unexpected error: {error}") from error
+        raise StructuredOutputParseError(f"Unexpected error: {error}") from error
 ```
 
 ### Async Patterns (Python 3.11+)
@@ -193,7 +203,7 @@ def parse_structured_output(
         Instance of the schema class with parsed data.
 
     Raises:
-        StructuredOutputError: If response cannot be parsed to schema.
+        StructuredOutputParseError: If response cannot be parsed to schema.
 
     Example:
         >>> output = parse_structured_output('{"name": "test"}', UserSchema)
