@@ -61,27 +61,37 @@ response = await agent.run(
     "What is the capital of France?",
     response_format=Response
 )
-print(response.result)  # Parsed Response object
+print(response)  # Parsed Response object
 ```
 
 ### Code Execution
 
 ```python
 import asyncio
-from agent_framework_ep import DockerCommandLineCodeExecutor, CodeBlock, CancellationToken
+import os
+from agent_framework_ep import DockerCommandLineCodeExecutor
+from agent_framework_ep import OpenAILikeChatClient, CodeExecutionTool
 
-async def main():
-    async with DockerCommandLineCodeExecutor(
-        image="python-code-sandbox"
-    ) as executor:
-        result = await executor.execute_code_blocks(
-            [CodeBlock(code="print('Hello, World!')", language="python")],
-            CancellationToken()
-        )
-        print(result.output)  # Hello, World!
-        print(result.exit_code)  # 0
+chat_client = OpenAILikeChatClient(
+    model_id="kimi/kimi-k2.5",
+)
 
-asyncio.run(main())
+code_executor = DockerCommandLineCodeExecutor(
+    image="python-code-sandbox",
+    work_dir="some_of_your_working_directory",
+    delete_tmp_files=True,
+    environment={
+        "TAVILY_API_KEY": os.environ.get("TAVILY_API_KEY"),
+    }
+)
+
+code_tool = CodeExecutionTool(code_executor).execute_code
+
+agent = chat_client.as_agent(
+    name="SkillsAssistant",
+    instructions="You're a helpful assistant.",
+    tools=[code_tool],
+)
 ```
 
 ### Dynamic Skills Provider

@@ -116,6 +116,27 @@ class TestCancellationToken:
         token.link_future(task)
         assert task.done()
 
+    @pytest.mark.asyncio
+    async def test_cancellation_token_watcher_task_saved(self) -> None:
+        """Test that link_future saves watcher task to prevent garbage collection."""
+        token = CancellationToken()
+
+        async def long_running_task() -> str:
+            await asyncio.sleep(10)
+            return "completed"
+
+        task = asyncio.create_task(long_running_task())
+        token.link_future(task)
+
+        # Verify _watcher_task is saved
+        assert token._watcher_task is not None
+        assert isinstance(token._watcher_task, asyncio.Task)
+        assert not token._watcher_task.done()
+
+        # Clean up
+        token.cancel()
+        await asyncio.sleep(0.1)
+
 
 class TestLangToCmd:
     """Tests for lang_to_cmd function."""
