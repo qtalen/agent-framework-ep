@@ -44,6 +44,7 @@ class CancellationToken:
 
     def __init__(self) -> None:
         self._event = asyncio.Event()
+        self._watcher_task: asyncio.Task[Any] | None = None
 
     def cancel(self) -> None:
         self._event.set()
@@ -58,7 +59,7 @@ class CancellationToken:
             if not fut.done():
                 fut.cancel()
 
-        asyncio.create_task(watcher())
+        self._watcher_task = asyncio.create_task(watcher())
 
 
 class CodeExecutor(ABC):
