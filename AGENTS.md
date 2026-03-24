@@ -41,8 +41,9 @@ This ensures consistency with the existing codebase and prevents introducing div
 ## Build / Lint / Test Commands
 
 ```bash
-# Install dependencies
-uv sync
+# Install dependencies (first time setup or after pyproject.toml changes)
+# Includes prerelease packages (required for agent-framework) and dev dependencies
+uv sync --prerelease=allow --all-extras
 
 # Run all tests
 uv run pytest
