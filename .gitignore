@@ -219,8 +219,8 @@ sandbox/
 container_tmp/
 
 # OpenSpec workflow files
-openspec/
 .opencode/
+openspec/changes/
 
 # Windows system file artifacts
 nul
