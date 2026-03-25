@@ -11,6 +11,7 @@ from .base import (
     silence_pip,
 )
 from .docker import DockerCommandLineCodeExecutor, DockerCommandLineCodeExecutorConfig
+from .local import LocalCommandLineCodeExecutor
 
 
 class CodeExecutionTool:
@@ -45,6 +46,7 @@ __all__ = [
     "CodeExecutionTool",
     "DockerCommandLineCodeExecutor",
     "DockerCommandLineCodeExecutorConfig",
+    "LocalCommandLineCodeExecutor",
     "lang_to_cmd",
     "silence_pip",
     "get_file_name_from_content",
