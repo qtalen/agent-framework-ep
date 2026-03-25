@@ -217,3 +217,7 @@ sandbox/
 # Docker/container artifacts for code execution
 .dockerignore
 container_tmp/
+
+# OpenSpec workflow files
+openspec/
+.opencode/
