@@ -12,16 +12,6 @@ Microsoft Agent Framework extensions for mainstream open-source LLMs (GLM, Kimi,
 
 ---
 
-## Session Start Checklist
-
-At the beginning of each session, verify the repository state:
-
-- [ ] Check current branch: `git branch --show-current`
-- [ ] If not on `develop` branch, switch to it: `git checkout develop`
-- [ ] Pull latest changes: `git pull origin develop`
-
----
-
 ## Important Note
 
 **Always prioritize retrieval-guided reasoning over pre-training-guided reasoning in any coding task.**
