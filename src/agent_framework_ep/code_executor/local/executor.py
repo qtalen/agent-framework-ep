@@ -129,6 +129,7 @@ class LocalCommandLineCodeExecutor(CodeExecutor):
             A tuple of (output, exit_code).
         """
         process: asyncio.subprocess.Process | None = None
+        cancelled_event = asyncio.Event()
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -138,15 +139,26 @@ class LocalCommandLineCodeExecutor(CodeExecutor):
                 cwd=str(self.work_dir),
             )
 
-            # Create a task that watches for cancellation
-            cancel_task = asyncio.create_task(self._wait_for_cancellation(cancellation_token))
-            cancel_task.add_done_callback(lambda _: asyncio.create_task(self._kill_process_if_cancelled(process)))
+            # Create a task that watches for cancellation and kills process
+            async def watch_cancellation() -> None:
+                while not cancellation_token.is_cancellation_requested:
+                    await asyncio.sleep(0.01)
+                cancelled_event.set()
+                if process.returncode is None:
+                    with contextlib.suppress(Exception):
+                        process.kill()
+                        await process.wait()
+
+            cancel_task = asyncio.create_task(watch_cancellation())
 
             try:
                 stdout, _ = await asyncio.wait_for(
                     process.communicate(),
                     timeout=self._timeout,
                 )
+                # Check if cancellation occurred while we were waiting
+                if cancelled_event.is_set():
+                    raise asyncio.CancelledError()
                 cancel_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await cancel_task
@@ -302,6 +314,89 @@ class LocalCommandLineCodeExecutor(CodeExecutor):
         """Async context manager entry."""
         await self.start()
         return self
+
+    async def execute_script(
+        self,
+        script_path: str,
+        args: dict[str, str] | None = None,
+        cancellation_token: CancellationToken | None = None,
+    ) -> CommandLineCodeResult:
+        """Execute an external Python script file with optional command-line arguments.
+
+        This method allows running an existing Python script with custom arguments.
+        The args dictionary is converted to command-line arguments in the form
+        of --key value.
+
+        Args:
+            script_path: Absolute or relative path to the Python script.
+                Relative paths are resolved against the working directory.
+            args: Optional dictionary of command-line arguments. Each key-value pair
+                is converted to --key value. For example: {"input": "data.txt", "verbose": "true"}
+                becomes --input data.txt --verbose true.
+
+                To pass positional arguments (without -- prefix), use an empty string as the key.
+                For example: {"": "arg1 arg2"} becomes: script.py arg1 arg2
+            cancellation_token: Optional token to cancel the execution. If None, the
+                execution cannot be cancelled externally.
+
+        Returns:
+            CommandLineCodeResult containing the execution output and exit code.
+
+        Raises:
+            ValueError: If the executor is not running or script file not found.
+        """
+        if not self._running:
+            raise ValueError("Executor is not running. Must first be started with either start or a context manager.")
+
+        self._check_security_warning()
+
+        # Resolve and validate script path
+        script_path_obj = Path(script_path)
+        if not script_path_obj.is_absolute():
+            script_path_obj = self.work_dir / script_path_obj
+
+        script_path_obj = script_path_obj.resolve()
+        work_dir_resolved = self.work_dir.resolve()
+
+        # Security: prevent path traversal
+        try:
+            script_path_obj.relative_to(work_dir_resolved)
+        except ValueError as e:
+            raise ValueError(
+                f"Script path '{script_path}' is outside the working directory. Resolved to: {script_path_obj}"
+            ) from e
+
+        if not script_path_obj.exists():
+            raise ValueError(f"Script file not found: {script_path}")
+
+        if not script_path_obj.is_file():
+            raise ValueError(f"Script path is not a file: {script_path}")
+
+        # Build command
+        command = ["python", str(script_path_obj)]
+        if args:
+            for key, value in args.items():
+                if key == "":
+                    command.extend(value.split())
+                else:
+                    command.extend([f"--{key}", value])
+
+        if cancellation_token is None:
+            cancellation_token = CancellationToken()
+
+        try:
+            output, exit_code = await self._execute_command(command, cancellation_token)
+            return CommandLineCodeResult(
+                exit_code=exit_code,
+                output=output,
+                code_file=str(script_path_obj),
+            )
+        except asyncio.CancelledError:
+            return CommandLineCodeResult(
+                exit_code=1,
+                output="Script execution was cancelled.",
+                code_file=str(script_path_obj),
+            )
 
     async def __aexit__(
         self,

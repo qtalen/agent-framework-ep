@@ -286,3 +286,201 @@ print(f"Sum: {x + y}")
 
         # After context manager exits, file should still exist
         assert Path(code_file).exists()
+
+
+class TestLocalCommandLineCodeExecutorExecuteScript:
+    """Test suite for execute_script method."""
+
+    @pytest.fixture
+    async def executor(self):
+        """Create a local executor for testing."""
+        async with LocalCommandLineCodeExecutor(timeout=5) as exec:
+            yield exec
+
+    @pytest.mark.asyncio
+    async def test_execute_script_success(self, tmp_path):
+        """Test successful Python script execution."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        # Create a test script
+        script_file = custom_dir / "test_script.py"
+        script_file.write_text("print('hello from script')", encoding="utf-8")
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir) as executor:
+            result = await executor.execute_script(
+                "test_script.py",
+                cancellation_token=CancellationToken(),
+            )
+            assert result.exit_code == 0
+            assert "hello from script" in result.output
+            assert result.code_file is not None
+
+    @pytest.mark.asyncio
+    async def test_execute_script_with_absolute_path(self, tmp_path):
+        """Test script execution with absolute path."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        script_file = custom_dir / "absolute_script.py"
+        script_file.write_text("print('absolute path works')", encoding="utf-8")
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir) as executor:
+            result = await executor.execute_script(
+                str(script_file.absolute()),
+                cancellation_token=CancellationToken(),
+            )
+            assert result.exit_code == 0
+            assert "absolute path works" in result.output
+
+    @pytest.mark.asyncio
+    async def test_execute_script_with_args(self, tmp_path):
+        """Test script execution with command-line arguments."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        script_file = custom_dir / "args_script.py"
+        script_content = """
+import sys
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--input", required=True)
+parser.add_argument("--verbose", required=True)
+args = parser.parse_args()
+print(f"input={args.input}, verbose={args.verbose}")
+"""
+        script_file.write_text(script_content, encoding="utf-8")
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir) as executor:
+            result = await executor.execute_script(
+                "args_script.py",
+                args={"input": "data.txt", "verbose": "true"},
+                cancellation_token=CancellationToken(),
+            )
+            assert result.exit_code == 0
+            assert "input=data.txt" in result.output
+            assert "verbose=true" in result.output
+
+    @pytest.mark.asyncio
+    async def test_execute_script_with_positional_args(self, tmp_path):
+        """Test script execution with positional arguments."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        script_file = custom_dir / "pos_args_script.py"
+        script_content = """
+import sys
+print(f"args: {sys.argv[1:]}")
+"""
+        script_file.write_text(script_content, encoding="utf-8")
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir) as executor:
+            result = await executor.execute_script(
+                "pos_args_script.py",
+                args={"": "arg1 arg2 arg3"},
+                cancellation_token=CancellationToken(),
+            )
+            assert result.exit_code == 0
+            assert "args: ['arg1', 'arg2', 'arg3']" in result.output
+
+    @pytest.mark.asyncio
+    async def test_execute_script_file_not_found(self, tmp_path):
+        """Test error handling for non-existent script file."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir) as executor:
+            with pytest.raises(ValueError, match="Script file not found"):
+                await executor.execute_script(
+                    "non_existent_script.py",
+                    cancellation_token=CancellationToken(),
+                )
+
+    @pytest.mark.asyncio
+    async def test_execute_script_path_traversal(self, tmp_path):
+        """Test path traversal prevention."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir) as executor:
+            with pytest.raises(ValueError, match="outside the working directory"):
+                await executor.execute_script(
+                    "../../../etc/passwd",
+                    cancellation_token=CancellationToken(),
+                )
+
+    @pytest.mark.asyncio
+    async def test_execute_script_timeout(self, tmp_path):
+        """Test script execution timeout."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        script_file = custom_dir / "timeout_script.py"
+        script_file.write_text("import time; time.sleep(10)", encoding="utf-8")
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir, timeout=1) as executor:
+            result = await executor.execute_script(
+                "timeout_script.py",
+                cancellation_token=CancellationToken(),
+            )
+            assert result.exit_code == 124
+            assert "Timeout" in result.output
+
+    @pytest.mark.asyncio
+    async def test_execute_script_cancellation(self, tmp_path):
+        """Test script execution cancellation."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        script_file = custom_dir / "cancel_script.py"
+        script_file.write_text("import time; time.sleep(60)", encoding="utf-8")
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir, timeout=30) as executor:
+            token = CancellationToken()
+
+            # Start execution and cancel it
+            task = asyncio.create_task(
+                executor.execute_script(
+                    "cancel_script.py",
+                    cancellation_token=token,
+                )
+            )
+
+            # Cancel after a short delay to ensure process is running
+            await asyncio.sleep(0.2)
+            token.cancel()
+
+            result = await task
+            # Process was killed, so exit code should be non-zero
+            assert result.exit_code != 0
+            assert "cancelled" in result.output.lower()
+
+    @pytest.mark.asyncio
+    async def test_execute_script_not_running(self, tmp_path):
+        """Test that using execute_script without starting raises an error."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        executor = LocalCommandLineCodeExecutor(work_dir=custom_dir)
+        with pytest.raises(ValueError, match="not running"):
+            await executor.execute_script(
+                "test.py",
+                cancellation_token=CancellationToken(),
+            )
+
+    @pytest.mark.asyncio
+    async def test_execute_script_directory_path(self, tmp_path):
+        """Test error handling when path is a directory."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        # Create a directory instead of a file
+        (custom_dir / "not_a_file").mkdir()
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir) as executor:
+            with pytest.raises(ValueError, match="not a file"):
+                await executor.execute_script(
+                    "not_a_file",
+                    cancellation_token=CancellationToken(),
+                )
