@@ -220,7 +220,6 @@ container_tmp/
 
 # OpenSpec workflow files
 .opencode/
-openspec/changes/
 
 # Windows system file artifacts
 nul

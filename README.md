@@ -4,18 +4,18 @@ Microsoft Agent Framework extensions for mainstream open-source LLMs, including 
 
 ## Features
 
-- **OpenAI-like Client Extensions** (`openai_like`)
+- **[OpenAI-like Client Extensions](https://www.dataleadsfuture.com/make-microsoft-agent-frameworks-structured-output-work-with-qwen-and-deepseek-models/)** (`openai_like`)
   - Structured output parsing with JSON fallback (dirtyjson, json-repair)
   - Reasoning content support for DeepSeek-R1 style models
   - Compatible with Microsoft Agent Framework's OpenAIChatClient
 
-- **Code Executor** (`code_executor`)
+- **[Code Executor](https://www.dataleadsfuture.com/exclusive-reveal-code-sandbox-tech-behind-manus-and-claude-agent-skills/)** (`code_executor`)
   - Docker-based code execution environment
   - Supports Python, bash, and shell scripts
   - Timeout and cancellation support
   - Isolated execution for security
 
-- **Dynamic Skills Provider** (`skills_provider`)
+- **[Dynamic Skills Provider](https://www.dataleadsfuture.com/how-to-use-agent-skills-in-enterprise-llm-agent-systems/)** (`skills_provider`)
   - Async skill updates before each agent run
   - Extendable skills from external sources
 
