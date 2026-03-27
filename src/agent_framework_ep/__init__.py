@@ -4,6 +4,7 @@ from agent_framework_ep.code_executor import (
     CodeExecutionTool,
     DockerCommandLineCodeExecutor,
     DockerCommandLineCodeExecutorConfig,
+    LocalCommandLineCodeExecutor,
     get_file_name_from_content,
 )
 from agent_framework_ep.openai_like import (
@@ -17,6 +18,7 @@ __all__ = [
     "CodeExecutionTool",
     "DockerCommandLineCodeExecutor",
     "DockerCommandLineCodeExecutorConfig",
+    "LocalCommandLineCodeExecutor",
     "get_file_name_from_content",
     # OpenAI Like
     "OpenAILikeChatClient",
@@ -25,4 +27,4 @@ __all__ = [
     "UpdatableSkillsProvider",
 ]
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
