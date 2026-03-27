@@ -97,6 +97,29 @@ class CodeExecutor(ABC):
         """Restart the code executor."""
         ...
 
+    @abstractmethod
+    async def execute_script(
+        self,
+        script_path: str,
+        args: dict[str, str] | None = None,
+        cancellation_token: CancellationToken | None = None,
+    ) -> CommandLineCodeResult:
+        """Execute an external Python script file with optional command-line arguments.
+
+        Args:
+            script_path: Path to the Python script.
+            args: Optional dictionary of command-line arguments. Each key-value pair is
+                converted to --key value. Use empty string key for positional arguments.
+            cancellation_token: Optional token to cancel the execution.
+
+        Returns:
+            CommandLineCodeResult containing the execution output and exit code.
+
+        Raises:
+            ValueError: If the executor is not running.
+        """
+        ...
+
     async def __aenter__(self) -> Self:
         await self.start()
         return self
