@@ -72,9 +72,8 @@ jobs:
       - name: Run pytest
         run: uv run pytest -m "not docker"
 
-      # Note: ruff check temporarily disabled due to pre-existing lint errors
-      # - name: Run ruff check
-      #   run: uv run ruff check .
+      - name: Run ruff check
+        run: uv run ruff check .
 
       - name: Run mypy
         run: uv run mypy src/agent_framework_ep

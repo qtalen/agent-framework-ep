@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import tempfile
 import uuid
@@ -252,10 +253,8 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
         finally:
             if self._delete_tmp_files:
                 for file in files:
-                    try:
+                    with contextlib.suppress(OSError, FileNotFoundError):
                         file.unlink()
-                    except (OSError, FileNotFoundError):
-                        pass
 
         code_file = str(files[0]) if files else None
         return CommandLineCodeResult(exit_code=last_exit_code, output="".join(outputs), code_file=code_file)

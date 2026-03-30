@@ -1,13 +1,9 @@
 """Tests for openai_like __init__ module."""
 
-from typing import Any
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from agent_framework_ep.openai_like import (
     OpenAILikeChatClient,
-    StructuredOutputParseError,
     get_reasoning_content,
 )
 from agent_framework_ep.openai_like._reasoning_content import ReasoningContentMixin

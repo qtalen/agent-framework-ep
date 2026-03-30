@@ -57,10 +57,7 @@ class ReasoningContentMixin:
 
         if "reasoning_content" in message.additional_properties:
             rc = message.additional_properties["reasoning_content"]
-            if pending_reasoning_content is None:
-                pending_reasoning_content = rc
-            else:
-                pending_reasoning_content = rc + pending_reasoning_content
+            pending_reasoning_content = rc if pending_reasoning_content is None else rc + pending_reasoning_content
 
         if len(filtered_contents) != len(message.contents):
             message = Message(
@@ -77,10 +74,9 @@ class ReasoningContentMixin:
             return
 
         for msg in reversed(result):
-            if msg.get("role") == "assistant":
-                if "content" in msg or "tool_calls" in msg:
-                    msg["reasoning_content"] = reasoning
-                    break
+            if msg.get("role") == "assistant" and ("content" in msg or "tool_calls" in msg):
+                msg["reasoning_content"] = reasoning
+                break
         else:
             if result and result[-1].get("role") == "assistant":
                 result[-1]["reasoning_content"] = reasoning
