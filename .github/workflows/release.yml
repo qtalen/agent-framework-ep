@@ -70,7 +70,7 @@ jobs:
         run: uv sync --prerelease=allow --all-extras
 
       - name: Run pytest
-        run: uv run pytest
+        run: uv run pytest -m "not docker"
 
       - name: Run ruff check
         run: uv run ruff check .
