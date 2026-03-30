@@ -1,6 +1,7 @@
 from typing import Literal
 
 from .base import (
+    BaseCommandLineCodeExecutor,
     CancellationToken,
     CodeBlock,
     CodeExecutor,
@@ -38,6 +39,7 @@ class CodeExecutionTool:
 
 
 __all__ = [
+    "BaseCommandLineCodeExecutor",
     "CodeBlock",
     "CodeExecutor",
     "CodeResult",
