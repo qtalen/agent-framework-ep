@@ -2,7 +2,7 @@
 
 import json
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import BaseModel, Field
@@ -147,7 +147,7 @@ class TestTryParseJsonWithFallbacks:
         """Test that first parse error is raised when all fail."""
         text = "not valid json at all"
         # First error should be json.JSONDecodeError
-        with pytest.raises(Exception):
+        with pytest.raises(json.JSONDecodeError):
             _try_parse_json_with_fallbacks(text)
 
     def test_empty_object(self) -> None:

@@ -169,9 +169,8 @@ def silence_pip(code: str, lang: str) -> str:
     lines = code.split("\n")
     for i, line in enumerate(lines):
         match = re.search(regex, line)
-        if match is not None:
-            if "-qqq" not in line:
-                lines[i] = line.replace(match.group(0), match.group(0) + " -qqq")
+        if match is not None and "-qqq" not in line:
+            lines[i] = line.replace(match.group(0), match.group(0) + " -qqq")
     return "\n".join(lines)
 
 
