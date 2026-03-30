@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 from agent_framework._types import (
@@ -19,7 +18,7 @@ def _set_additional_property(obj: ChatResponse | ChatResponseUpdate, key: str, v
 
 class ReasoningContentMixin:
     def _propagate_reasoning_in_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        result = copy.deepcopy(messages)
+        result = [dict(m) for m in messages]
         pending_reasoning_content: str | None = None
 
         for msg in result:

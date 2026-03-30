@@ -1,6 +1,7 @@
 """Agent Framework EP - Microsoft Agent Framework extensions for open-source LLMs."""
 
 from agent_framework_ep.code_executor import (
+    BaseCommandLineCodeExecutor,
     CodeExecutionTool,
     DockerCommandLineCodeExecutor,
     DockerCommandLineCodeExecutorConfig,
@@ -23,6 +24,7 @@ __all__ = [
     # Version
     "__version__",
     # Code Executor
+    "BaseCommandLineCodeExecutor",
     "CodeExecutionTool",
     "DockerCommandLineCodeExecutor",
     "DockerCommandLineCodeExecutorConfig",

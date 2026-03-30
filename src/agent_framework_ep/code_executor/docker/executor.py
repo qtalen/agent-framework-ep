@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
-import tempfile
 import uuid
 from concurrent.futures import Future as ConcurrentFuture
-from hashlib import sha256
 from pathlib import Path
-from typing import ClassVar
 
 import docker  # type: ignore[import-untyped]
 from docker.errors import DockerException, ImageNotFound, NotFound  # type: ignore[import-untyped]
@@ -16,13 +12,11 @@ from docker.models.containers import Container  # type: ignore[import-untyped]
 from pydantic import BaseModel
 
 from agent_framework_ep.code_executor.base import (
+    BaseCommandLineCodeExecutor,
     CancellationToken,
     CodeBlock,
-    CodeExecutor,
     CommandLineCodeResult,
-    get_file_name_from_content,
     lang_to_cmd,
-    silence_pip,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,7 +50,7 @@ async def _wait_for_ready(container: Container, timeout: int = 60, stop_time: fl
         raise ValueError("Container failed to start")
 
 
-class DockerCommandLineCodeExecutor(CodeExecutor):
+class DockerCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
     """Executes code through a command line environment in a Docker container.
 
     The executor first saves each code block in a file in the working
@@ -91,16 +85,6 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
             to pass to the container. Defaults to None.
     """
 
-    SUPPORTED_LANGUAGES: ClassVar[list[str]] = [
-        "bash",
-        "shell",
-        "sh",
-        "pwsh",
-        "powershell",
-        "ps1",
-        "python",
-    ]
-
     def __init__(
         self,
         image: str = "python:3-slim",
@@ -117,17 +101,18 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
         delete_tmp_files: bool = False,
         environment: dict[str, str] | None = None,
     ):
-        if timeout < 1:
-            raise ValueError("Timeout must be greater than or equal to 1.")
+        super().__init__(
+            timeout=timeout,
+            work_dir=work_dir,
+            delete_tmp_files=delete_tmp_files,
+        )
 
         self._image = image
-        self._timeout = timeout
         self._auto_remove = auto_remove
         self._stop_container = stop_container
         self._extra_volumes = extra_volumes if extra_volumes is not None else {}
         self._extra_hosts = extra_hosts if extra_hosts is not None else {}
         self._init_command = init_command
-        self._delete_tmp_files = delete_tmp_files
         self._environment = environment if environment is not None else {}
 
         if container_name is None:
@@ -135,38 +120,14 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
         else:
             self._container_name = container_name
 
-        self._work_dir: Path | None = None
-        if work_dir is not None:
-            if isinstance(work_dir, str):
-                work_dir = Path(work_dir)
-            work_dir.mkdir(exist_ok=True, parents=True)
-            self._work_dir = work_dir
-
         self._bind_dir: Path | None = None
         if bind_dir is not None:
             self._bind_dir = Path(bind_dir) if isinstance(bind_dir, str) else bind_dir
         else:
             self._bind_dir = self._work_dir
 
-        self._temp_dir: tempfile.TemporaryDirectory[str] | None = None
         self._container: Container | None = None
-        self._running = False
-        self._loop: asyncio.AbstractEventLoop | None = None
         self._cancellation_futures: list[ConcurrentFuture[None]] = []
-
-    @property
-    def timeout(self) -> int:
-        """The timeout for code execution."""
-        return self._timeout
-
-    @property
-    def work_dir(self) -> Path:
-        """The working directory for code execution."""
-        if self._work_dir is not None:
-            return self._work_dir
-        if self._temp_dir is not None:
-            return Path(self._temp_dir.name)
-        raise RuntimeError("Working directory not properly initialized")
 
     @property
     def bind_dir(self) -> Path:
@@ -179,6 +140,10 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
     def container_name(self) -> str:
         """The container name."""
         return self._container_name
+
+    def _build_command(self, lang: str, filename: str) -> list[str]:
+        """Build the command to execute a code file in Docker with timeout."""
+        return ["timeout", str(self._timeout), lang_to_cmd(lang), filename]
 
     async def _execute_command(self, command: list[str], cancellation_token: CancellationToken) -> tuple[str, int]:
         """Execute a command in the container."""
@@ -196,14 +161,14 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
                 output += "\n Timeout"
             return output, exit_code
         except asyncio.CancelledError:
-            if self._loop and not self._loop.is_closed():
-                try:
-                    future: ConcurrentFuture[None] = asyncio.run_coroutine_threadsafe(
-                        self._kill_running_command(command), self._loop
-                    )
-                    self._cancellation_futures.append(future)
-                except RuntimeError as e:
-                    logger.error(f"Failed to schedule kill command: {e}")
+            try:
+                loop = asyncio.get_running_loop()
+                future: ConcurrentFuture[None] = asyncio.run_coroutine_threadsafe(
+                    self._kill_running_command(command), loop
+                )
+                self._cancellation_futures.append(future)
+            except RuntimeError as e:
+                logger.error(f"Failed to schedule kill command: {e}")
             return "Code execution was cancelled.", 1
 
     async def _kill_running_command(self, command: list[str]) -> None:
@@ -215,61 +180,17 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
         except Exception as e:
             logger.warning(f"Failed to kill command: {e}")
 
-    async def _execute_code_dont_check_setup(
-        self, code_blocks: list[CodeBlock], cancellation_token: CancellationToken
-    ) -> CommandLineCodeResult:
-        """Execute code blocks without checking setup."""
-        if self._container is None or not self._running:
-            raise ValueError("Container is not running. Must first be started with either start or a context manager.")
-
-        if len(code_blocks) == 0:
-            raise ValueError("No code blocks to execute.")
-
-        outputs: list[str] = []
-        files: list[Path] = []
-        last_exit_code = 0
-
-        try:
-            for code_block in code_blocks:
-                lang = code_block.language.lower()
-                code = silence_pip(code_block.code, lang)
-
-                filename = get_file_name_from_content(code, self.work_dir)
-                if filename is None:
-                    filename = f"tmp_code_{sha256(code.encode()).hexdigest()}.{lang}"
-
-                code_path = self.work_dir / filename
-                code_path.write_text(code, encoding="utf-8")
-                files.append(code_path)
-
-                command = ["timeout", str(self._timeout), lang_to_cmd(lang), filename]
-
-                output, exit_code = await self._execute_command(command, cancellation_token)
-                outputs.append(output)
-                last_exit_code = exit_code
-
-                if exit_code != 0:
-                    break
-        finally:
-            if self._delete_tmp_files:
-                for file in files:
-                    with contextlib.suppress(OSError, FileNotFoundError):
-                        file.unlink()
-
-        code_file = str(files[0]) if files else None
-        return CommandLineCodeResult(exit_code=last_exit_code, output="".join(outputs), code_file=code_file)
-
     async def execute_code_blocks(
         self, code_blocks: list[CodeBlock], cancellation_token: CancellationToken
     ) -> CommandLineCodeResult:
         """Execute code blocks and return the result."""
+        if self._container is None or not self._running:
+            raise ValueError("Container is not running. Must first be started with either start or a context manager.")
         return await self._execute_code_dont_check_setup(code_blocks, cancellation_token)
 
     async def start(self) -> None:
         """Start the code executor."""
-        if self._work_dir is None and self._temp_dir is None:
-            self._temp_dir = tempfile.TemporaryDirectory()
-            Path(self._temp_dir.name).mkdir(exist_ok=True)
+        await super().start()
 
         try:
             client = docker.from_env()
@@ -315,13 +236,7 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
 
         await _wait_for_ready(self._container)
 
-        if self._container.status != "running":
-            logs_str = self._container.logs().decode("utf-8")
-            raise ValueError(f"Failed to start container from image {self._image}. Logs: {logs_str}")
-
-        self._loop = asyncio.get_running_loop()
         self._cancellation_futures = []
-        self._running = True
         logger.debug(f"DockerCommandLineCodeExecutor started with container: {self._container_name}")
 
     async def stop(self) -> None:
@@ -344,15 +259,13 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
                 return
 
             if self._cancellation_futures:
-                if not self._loop or self._loop.is_closed():
-                    logger.warning("Executor loop is closed or unavailable. Cannot wait for cancellation futures.")
-                    self._cancellation_futures.clear()
-                else:
-                    asyncio_futures = [
-                        asyncio.wrap_future(f, loop=self._loop) for f in self._cancellation_futures if not f.done()
-                    ]
+                try:
+                    asyncio_futures = [asyncio.wrap_future(f) for f in self._cancellation_futures if not f.done()]
                     if asyncio_futures:
                         await asyncio.gather(*asyncio_futures, return_exceptions=True)
+                except RuntimeError:
+                    logger.warning("Executor loop is closed or unavailable. Cannot wait for cancellation futures.")
+                finally:
                     self._cancellation_futures.clear()
 
             logger.debug(f"Stopping container {self._container_name}...")
@@ -374,10 +287,6 @@ class DockerCommandLineCodeExecutor(CodeExecutor):
 
         await asyncio.to_thread(self._container.restart)
         await _wait_for_ready(self._container)
-
-        if self._container.status != "running":
-            logs_str = self._container.logs().decode("utf-8")
-            raise ValueError(f"Failed to restart container. Logs: {logs_str}")
 
     async def execute_script(
         self,
