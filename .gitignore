@@ -214,6 +214,9 @@ sandbox/
 *.sandbox
 .exec_cache/
 
+# Hatch-vcs generated version file
+src/agent_framework_ep/_version.py
+
 # Docker/container artifacts for code execution
 .dockerignore
 container_tmp/

@@ -1,6 +1,6 @@
 [project]
 name = "agent-framework-ep"
-version = "0.1.5"
+dynamic = ["version"]
 description = "Microsoft Agent Framework extensions for mainstream open-source LLMs"
 readme = "README.md"
 license = {text = "MIT"}
@@ -38,8 +38,14 @@ dev = [
 Repository = "https://github.com/qtalen/agent-framework-ep"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/agent_framework_ep/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_framework_ep"]

@@ -13,7 +13,15 @@ from agent_framework_ep.openai_like import (
 )
 from agent_framework_ep.skills_provider import UpdatableSkillsProvider
 
+try:
+    from agent_framework_ep._version import __version__
+except ImportError:
+    # Development mode (package not installed, _version.py not generated)
+    __version__ = "0.0.0+dev"
+
 __all__ = [
+    # Version
+    "__version__",
     # Code Executor
     "CodeExecutionTool",
     "DockerCommandLineCodeExecutor",
@@ -26,5 +34,3 @@ __all__ = [
     # Skills Provider
     "UpdatableSkillsProvider",
 ]
-
-__version__ = "0.1.5"
