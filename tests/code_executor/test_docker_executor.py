@@ -13,7 +13,7 @@ from agent_framework_ep.code_executor import (
 )
 
 # Docker image to use for tests
-TEST_IMAGE = "python-code-sandbox"
+TEST_IMAGE = "python:3.12-slim-bookworm"
 
 
 class TestDockerCommandLineCodeExecutorInitialization:
