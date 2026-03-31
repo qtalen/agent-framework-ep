@@ -10,6 +10,7 @@ from agent_framework_ep.code_executor import (
 )
 from agent_framework_ep.openai_like import (
     OpenAILikeChatClient,
+    OpenAILikeChatCompletionClient,
     get_reasoning_content,
 )
 from agent_framework_ep.skills_provider import UpdatableSkillsProvider
@@ -32,6 +33,7 @@ __all__ = [
     "get_file_name_from_content",
     # OpenAI Like
     "OpenAILikeChatClient",
+    "OpenAILikeChatCompletionClient",
     "get_reasoning_content",
     # Skills Provider
     "UpdatableSkillsProvider",

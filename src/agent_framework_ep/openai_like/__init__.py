@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, override
 
 from agent_framework._types import ChatResponse, ChatResponseUpdate, Message
-from agent_framework.openai import OpenAIChatClient
+from agent_framework_openai import OpenAIChatCompletionClient
 from pydantic import BaseModel
 
 from ._exceptions import StructuredOutputParseError
@@ -12,13 +12,24 @@ from ._reasoning_content import ReasoningContentMixin
 from ._response_format import ResponseFormatMixin
 
 __all__ = [
-    "OpenAILikeChatClient",
+    "OpenAILikeChatCompletionClient",
+    "OpenAILikeChatClient",  # Backward compatibility alias
     "get_reasoning_content",
     "StructuredOutputParseError",
 ]
 
 
-class OpenAILikeChatClient(ResponseFormatMixin, ReasoningContentMixin, OpenAIChatClient):
+class OpenAILikeChatCompletionClient(ResponseFormatMixin, ReasoningContentMixin, OpenAIChatCompletionClient):
+    """Extended OpenAI ChatCompletion client with structured output and reasoning content support.
+
+    This client uses the Chat Completions API, which is compatible with
+    domestic LLMs like DeepSeek, Kimi, and Qwen that return `reasoning_content` field.
+
+    Args:
+        *args: Positional arguments passed to OpenAIChatCompletionClient.
+        **kwargs: Keyword arguments passed to OpenAIChatCompletionClient.
+    """
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._current_response_format: type[BaseModel] | None = None
@@ -68,7 +79,19 @@ class OpenAILikeChatClient(ResponseFormatMixin, ReasoningContentMixin, OpenAICha
         return self._extract_reasoning_from_update(chunk, update)
 
 
+# Backward compatibility alias
+OpenAILikeChatClient = OpenAILikeChatCompletionClient
+
+
 def get_reasoning_content(response: ChatResponse | ChatResponseUpdate) -> str:
+    """Extract reasoning content from a ChatResponse or ChatResponseUpdate.
+
+    Args:
+        response: The response object to extract reasoning from.
+
+    Returns:
+        The reasoning content as a string, or empty string if none found.
+    """
     additional_props = getattr(response, "additional_properties", None)
     if additional_props and (reasoning := additional_props.get("reasoning_content")):
         return str(reasoning)

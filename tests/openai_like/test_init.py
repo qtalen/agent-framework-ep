@@ -4,24 +4,29 @@ from unittest.mock import MagicMock, patch
 
 from agent_framework_ep.openai_like import (
     OpenAILikeChatClient,
+    OpenAILikeChatCompletionClient,
     get_reasoning_content,
 )
 from agent_framework_ep.openai_like._reasoning_content import ReasoningContentMixin
 from agent_framework_ep.openai_like._response_format import ResponseFormatMixin
 
 
-class TestOpenAILikeChatClient:
-    """Tests for OpenAILikeChatClient class."""
+class TestOpenAILikeChatCompletionClient:
+    """Tests for OpenAILikeChatCompletionClient class."""
 
     def test_inherits_from_mixins(self) -> None:
         """Test client inherits from both mixins."""
-        assert issubclass(OpenAILikeChatClient, ResponseFormatMixin)
-        assert issubclass(OpenAILikeChatClient, ReasoningContentMixin)
+        assert issubclass(OpenAILikeChatCompletionClient, ResponseFormatMixin)
+        assert issubclass(OpenAILikeChatCompletionClient, ReasoningContentMixin)
 
-    @patch("agent_framework_ep.openai_like.OpenAIChatClient")
+    def test_alias_exists(self) -> None:
+        """Test OpenAILikeChatClient is an alias for OpenAILikeChatCompletionClient."""
+        assert OpenAILikeChatClient is OpenAILikeChatCompletionClient
+
+    @patch("agent_framework_ep.openai_like.OpenAIChatCompletionClient")
     def test_init_sets_current_response_format(self, mock_parent: MagicMock) -> None:
         """Test __init__ initializes _current_response_format."""
-        client = OpenAILikeChatClient.__new__(OpenAILikeChatClient)
+        client = OpenAILikeChatCompletionClient.__new__(OpenAILikeChatCompletionClient)
         # Manually call init to avoid calling real parent
         client._current_response_format = None
 
@@ -237,7 +242,8 @@ class TestExports:
         """Test __all__ contains expected exports."""
         from agent_framework_ep.openai_like import __all__
 
+        assert "OpenAILikeChatCompletionClient" in __all__
         assert "OpenAILikeChatClient" in __all__
         assert "get_reasoning_content" in __all__
         assert "StructuredOutputParseError" in __all__
-        assert len(__all__) == 3
+        assert len(__all__) == 4

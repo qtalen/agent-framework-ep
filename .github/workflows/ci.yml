@@ -111,4 +111,4 @@ jobs:
         run: uv sync --prerelease=allow --all-extras
 
       - name: Run pytest
-        run: uv run pytest -m "not docker"
+        run: uv run pytest
