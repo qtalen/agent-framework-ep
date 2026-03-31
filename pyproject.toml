@@ -99,3 +99,8 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = ["--import-mode=importlib"]
 pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "vcrpy>=8.1.1",
+]
