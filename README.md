@@ -9,7 +9,8 @@ Microsoft Agent Framework extensions for mainstream open-source LLMs, including 
 - **[OpenAI-like Client Extensions](https://www.dataleadsfuture.com/make-microsoft-agent-frameworks-structured-output-work-with-qwen-and-deepseek-models/)** (`openai_like`)
   - Structured output parsing with JSON fallback (dirtyjson, json-repair)
   - Reasoning content support for DeepSeek-R1 style models
-  - Compatible with Microsoft Agent Framework's OpenAIChatClient
+  - Uses Chat Completions API, compatible with domestic LLMs (DeepSeek, Kimi, Qwen)
+  - **Requires**: `agent-framework>=1.0.0rc6` and `agent-framework-openai>=1.0.0rc6`
 
 - **[Code Executor](https://www.dataleadsfuture.com/exclusive-reveal-code-sandbox-tech-behind-manus-and-claude-agent-skills/)** (`code_executor`)
   - Docker-based code execution environment
