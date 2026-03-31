@@ -7,12 +7,12 @@ OpenAILikeChatCompletionClient correctly extracts reasoning_content.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import vcr
-
 from agent_framework._types import Message
+
 from agent_framework_ep.openai_like import OpenAILikeChatCompletionClient, get_reasoning_content
 
 if TYPE_CHECKING:
@@ -157,12 +157,7 @@ class TestDeepSeekReasoningIntegration:
         mock_openai_client.chat = MagicMock()
         mock_openai_client.chat.completions = MagicMock()
 
-        import asyncio
-
-        async def mock_create(*args, **kwargs):
-            return mock_response
-
-        mock_openai_client.chat.completions.create = mock_create
+        mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         # Create our client with mocked underlying client
         client = OpenAILikeChatCompletionClient(
