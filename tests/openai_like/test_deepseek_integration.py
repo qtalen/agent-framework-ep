@@ -8,8 +8,6 @@ from __future__ import annotations
 import pytest
 import vcr
 
-from agent_framework_ep import OpenAILikeChatCompletionClient, get_reasoning_content
-
 
 class TestDeepSeekReasoningIntegration:
     """Integration tests using recorded DeepSeek-R1 responses."""
