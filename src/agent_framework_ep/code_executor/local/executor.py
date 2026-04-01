@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shlex
+import sys
 from pathlib import Path
-from types import TracebackType
-from typing import Self
 
 from agent_framework_ep.code_executor.base import (
     BaseCommandLineCodeExecutor,
@@ -167,10 +167,7 @@ class LocalCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
 
         self._check_security_warning()
 
-        try:
-            return await self._execute_code_dont_check_setup(code_blocks, cancellation_token)
-        except asyncio.CancelledError:
-            return CommandLineCodeResult(exit_code=1, output="Code execution was cancelled.", code_file=None)
+        return await self._execute_code_dont_check_setup(code_blocks, cancellation_token)
 
     async def execute_script(
         self,
@@ -230,42 +227,23 @@ class LocalCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
             raise ValueError(f"Script path is not a file: {script_path}")
 
         # Build command
-        command = ["python", str(script_path_obj)]
+        command = [sys.executable, str(script_path_obj)]
         if args:
             for key, value in args.items():
                 if key == "":
-                    command.extend(value.split())
+                    command.extend(shlex.split(value))
                 else:
                     command.extend([f"--{key}", value])
 
         if cancellation_token is None:
             cancellation_token = CancellationToken()
 
-        try:
-            output, exit_code = await self._execute_command(command, cancellation_token)
-            return CommandLineCodeResult(
-                exit_code=exit_code,
-                output=output,
-                code_file=str(script_path_obj),
-            )
-        except asyncio.CancelledError:
-            return CommandLineCodeResult(
-                exit_code=1,
-                output="Script execution was cancelled.",
-                code_file=str(script_path_obj),
-            )
+        output, exit_code = await self._execute_command(command, cancellation_token)
+        return CommandLineCodeResult(
+            exit_code=exit_code,
+            output=output,
+            code_file=str(script_path_obj),
+        )
 
-    async def __aenter__(self) -> Self:
-        """Async context manager entry."""
-        await self.start()
-        return self
 
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> bool | None:
-        """Async context manager exit."""
-        await self.stop()
-        return None
+__all__ = ["LocalCommandLineCodeExecutor"]

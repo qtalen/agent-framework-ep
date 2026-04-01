@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import shlex
 import uuid
 from concurrent.futures import Future as ConcurrentFuture
 from pathlib import Path
@@ -9,7 +11,7 @@ from pathlib import Path
 import docker  # type: ignore[import-untyped]
 from docker.errors import DockerException, ImageNotFound, NotFound  # type: ignore[import-untyped]
 from docker.models.containers import Container  # type: ignore[import-untyped]
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent_framework_ep.code_executor.base import (
     BaseCommandLineCodeExecutor,
@@ -32,11 +34,11 @@ class DockerCommandLineCodeExecutorConfig(BaseModel):
     bind_dir: str | None = None
     auto_remove: bool = True
     stop_container: bool = True
-    extra_volumes: dict[str, dict[str, str]] = {}
-    extra_hosts: dict[str, str] = {}
+    extra_volumes: dict[str, dict[str, str]] = Field(default_factory=dict)
+    extra_hosts: dict[str, str] = Field(default_factory=dict)
     init_command: str | None = None
     delete_tmp_files: bool = False
-    environment: dict[str, str] = {}
+    environment: dict[str, str] = Field(default_factory=dict)
 
 
 async def _wait_for_ready(container: Container, timeout: int = 60, stop_time: float = 0.1) -> None:
@@ -127,7 +129,9 @@ class DockerCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
             self._bind_dir = self._work_dir
 
         self._container: Container | None = None
+        self._client: docker.DockerClient | None = None
         self._cancellation_futures: list[ConcurrentFuture[None]] = []
+        self._cancellation_lock = asyncio.Lock()
 
     @property
     def bind_dir(self) -> Path:
@@ -166,10 +170,11 @@ class DockerCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
                 future: ConcurrentFuture[None] = asyncio.run_coroutine_threadsafe(
                     self._kill_running_command(command), loop
                 )
-                self._cancellation_futures.append(future)
+                async with self._cancellation_lock:
+                    self._cancellation_futures.append(future)
             except RuntimeError as e:
                 logger.error(f"Failed to schedule kill command: {e}")
-            return "Code execution was cancelled.", 1
+            raise
 
     async def _kill_running_command(self, command: list[str]) -> None:
         """Kill a running command in the container."""
@@ -188,28 +193,57 @@ class DockerCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
             raise ValueError("Container is not running. Must first be started with either start or a context manager.")
         return await self._execute_code_dont_check_setup(code_blocks, cancellation_token)
 
+    def _validate_init_command(self, init_command: str | None) -> str | None:
+        """Validate init_command to prevent command injection.
+
+        Args:
+            init_command: The init command to validate.
+
+        Returns:
+            The validated command, or None if input was None.
+
+        Raises:
+            ValueError: If the command contains dangerous characters.
+        """
+        if init_command is None:
+            return None
+
+        # Check for dangerous characters that could lead to command injection
+        dangerous_chars = [";", "&", "|", "`", "$", "(", ")", "{", "}", "<", ">", "'", '"', "\n", "\r"]
+        for char in dangerous_chars:
+            if char in init_command:
+                raise ValueError(
+                    f"init_command contains dangerous character '{char}'. "
+                    "Use a safe command without shell metacharacters."
+                )
+
+        return init_command
+
     async def start(self) -> None:
         """Start the code executor."""
         await super().start()
 
         try:
-            client = docker.from_env()
+            self._client = docker.from_env()
         except DockerException as e:
             if "FileNotFoundError" in str(e):
                 raise RuntimeError("Failed to connect to Docker. Please ensure Docker is installed and running.") from e
             raise RuntimeError(f"Unexpected error while connecting to Docker: {str(e)}") from e
 
         try:
-            await asyncio.to_thread(client.images.get, self._image)
+            await asyncio.to_thread(self._client.images.get, self._image)
         except ImageNotFound:
             logger.info(f"Pulling image {self._image}...")
-            await asyncio.to_thread(client.images.pull, self._image)
+            await asyncio.to_thread(self._client.images.pull, self._image)
 
         shell_command = "/bin/sh"
-        command = ["-c", f"{self._init_command};exec {shell_command}"] if self._init_command else None
+        command = None
+        if self._init_command:
+            validated_command = self._validate_init_command(self._init_command)
+            command = ["-c", f"{validated_command};exec {shell_command}"]
 
         try:
-            existing_container = await asyncio.to_thread(client.containers.get, self._container_name)
+            existing_container = await asyncio.to_thread(self._client.containers.get, self._container_name)
             await asyncio.to_thread(existing_container.remove, force=True)
         except NotFound:
             pass
@@ -217,26 +251,36 @@ class DockerCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
         volumes = {str(self.bind_dir.resolve()): {"bind": "/workspace", "mode": "rw"}}
         volumes.update(self._extra_volumes)
 
-        self._container = await asyncio.to_thread(
-            client.containers.create,
-            self._image,
-            name=self._container_name,
-            entrypoint=shell_command,
-            command=command,
-            tty=True,
-            detach=True,
-            auto_remove=self._auto_remove,
-            volumes=volumes,
-            working_dir="/workspace",
-            extra_hosts=self._extra_hosts,
-            environment=self._environment,
-        )
-        assert self._container is not None
-        await asyncio.to_thread(self._container.start)
+        container: Container | None = None
+        try:
+            container = await asyncio.to_thread(
+                self._client.containers.create,
+                self._image,
+                name=self._container_name,
+                entrypoint=shell_command,
+                command=command,
+                tty=True,
+                detach=True,
+                auto_remove=self._auto_remove,
+                volumes=volumes,
+                working_dir="/workspace",
+                extra_hosts=self._extra_hosts,
+                environment=self._environment,
+            )
+            assert container is not None
+            await asyncio.to_thread(container.start)
+            self._container = container
+        except Exception:
+            # Clean up container if creation/start failed
+            if container is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(container.remove, force=True)
+            raise
 
         await _wait_for_ready(self._container)
 
-        self._cancellation_futures = []
+        async with self._cancellation_lock:
+            self._cancellation_futures = []
         logger.debug(f"DockerCommandLineCodeExecutor started with container: {self._container_name}")
 
     async def stop(self) -> None:
@@ -248,29 +292,35 @@ class DockerCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
             self._temp_dir.cleanup()
             self._temp_dir = None
 
-        client = docker.from_env()
         try:
-            try:
-                container = await asyncio.to_thread(client.containers.get, self._container_name)
-            except NotFound:
-                logger.debug(f"Container {self._container_name} not found during stop...")
-                self._running = False
-                self._cancellation_futures.clear()
-                return
-
-            if self._cancellation_futures:
+            if self._client is not None:
                 try:
-                    asyncio_futures = [asyncio.wrap_future(f) for f in self._cancellation_futures if not f.done()]
-                    if asyncio_futures:
-                        await asyncio.gather(*asyncio_futures, return_exceptions=True)
-                except RuntimeError:
-                    logger.warning("Executor loop is closed or unavailable. Cannot wait for cancellation futures.")
-                finally:
-                    self._cancellation_futures.clear()
+                    container = await asyncio.to_thread(self._client.containers.get, self._container_name)
+                except NotFound:
+                    logger.debug(f"Container {self._container_name} not found during stop...")
+                    self._running = False
+                    async with self._cancellation_lock:
+                        self._cancellation_futures.clear()
+                    return
 
-            logger.debug(f"Stopping container {self._container_name}...")
-            await asyncio.to_thread(container.stop)
-            logger.debug(f"Container {self._container_name} stopped.")
+                async with self._cancellation_lock:
+                    if self._cancellation_futures:
+                        try:
+                            asyncio_futures = [
+                                asyncio.wrap_future(f) for f in self._cancellation_futures if not f.done()
+                            ]
+                            if asyncio_futures:
+                                await asyncio.gather(*asyncio_futures, return_exceptions=True)
+                        except RuntimeError:
+                            logger.warning(
+                                "Executor loop is closed or unavailable. Cannot wait for cancellation futures."
+                            )
+                        finally:
+                            self._cancellation_futures.clear()
+
+                logger.debug(f"Stopping container {self._container_name}...")
+                await asyncio.to_thread(container.stop)
+                logger.debug(f"Container {self._container_name} stopped.")
 
         except DockerException as e:
             logger.error(f"Docker error while stopping container {self._container_name}: {e}")
@@ -278,7 +328,16 @@ class DockerCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
             logger.exception(f"Unexpected error during stop operation: {e}")
         finally:
             self._running = False
-            self._cancellation_futures.clear()
+            async with self._cancellation_lock:
+                self._cancellation_futures.clear()
+            # Close Docker client connection
+            if self._client is not None:
+                try:
+                    await asyncio.to_thread(self._client.close)
+                except Exception as e:
+                    logger.warning(f"Failed to close Docker client: {e}")
+                finally:
+                    self._client = None
 
     async def restart(self) -> None:
         """Restart the Docker container."""
@@ -326,7 +385,7 @@ class DockerCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
         if args:
             for key, value in args.items():
                 if key == "":
-                    command.extend(value.split())
+                    command.extend(shlex.split(value))
                 else:
                     command.extend([f"--{key}", value])
 
@@ -374,3 +433,10 @@ class DockerCommandLineCodeExecutor(BaseCommandLineCodeExecutor):
             delete_tmp_files=config.delete_tmp_files,
             environment=config.environment,
         )
+
+
+__all__ = [
+    "DockerCommandLineCodeExecutorConfig",
+    "DockerCommandLineCodeExecutor",
+    "_wait_for_ready",
+]
