@@ -12,6 +12,8 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, ClassVar, Self
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class CodeBlock:
@@ -29,17 +31,11 @@ class CodeResult:
     output: str
 
 
+@dataclass
 class CommandLineCodeResult(CodeResult):
     """A code result class for command line code executor."""
 
-    def __init__(
-        self,
-        exit_code: int,
-        output: str,
-        code_file: str | None = None,
-    ):
-        super().__init__(exit_code=exit_code, output=output)
-        self.code_file = code_file
+    code_file: str | None = None
 
 
 class CancellationToken:
@@ -47,7 +43,7 @@ class CancellationToken:
 
     def __init__(self) -> None:
         self._event = asyncio.Event()
-        self._watcher_task: asyncio.Task[Any] | None = None
+        self._watcher_tasks: list[asyncio.Task[Any]] = []
 
     def cancel(self) -> None:
         self._event.set()
@@ -66,7 +62,19 @@ class CancellationToken:
             if not fut.done():
                 fut.cancel()
 
-        self._watcher_task = asyncio.create_task(watcher())
+        task = asyncio.create_task(watcher())
+        self._watcher_tasks.append(task)
+
+    def cleanup(self) -> None:
+        """Clean up all watcher tasks.
+
+        This method should be called when the token is no longer needed
+        to prevent task leaks.
+        """
+        for task in self._watcher_tasks:
+            if not task.done():
+                task.cancel()
+        self._watcher_tasks.clear()
 
 
 class CodeExecutor(ABC):
@@ -313,13 +321,12 @@ class BaseCommandLineCodeExecutor(CodeExecutor):
         await self.start()
 
 
-logger = logging.getLogger(__name__)
-
 PYTHON_VARIANTS = ["python", "Python", "py"]
 
 # Pre-compiled regex patterns for silence_pip
-_SILENCE_PIP_PYTHON_RE = re.compile(r"^! ?pip install")
-_SILENCE_PIP_SHELL_RE = re.compile(r"^pip install")
+# Support: !pip install, pip install, pip3 install, python -m pip install, python3 -m pip install
+_SILENCE_PIP_PYTHON_RE = re.compile(r"^! ?pip(3)? install")
+_SILENCE_PIP_SHELL_RE = re.compile(r"^(pip(3)? install|python(3)? -m pip install)")
 
 
 def lang_to_cmd(lang: str) -> str:
@@ -367,11 +374,24 @@ def get_file_name_from_content(code: str, workspace_path: Path) -> str | None:
         path = Path(filename)
         if not path.is_absolute():
             path = workspace_path / path
+        # Use resolve() to normalize the path and check for traversal
+        path = path.resolve()
         try:
-            # Use resolve() to normalize the path and check for traversal
-            path = path.resolve()
             relative = path.relative_to(workspace_path.resolve())
             return str(relative)
-        except ValueError:
-            pass
+        except ValueError as e:
+            raise ValueError(f"Path traversal detected: '{filename}' resolves outside workspace") from e
     return None
+
+
+__all__ = [
+    "CodeBlock",
+    "CodeResult",
+    "CommandLineCodeResult",
+    "CancellationToken",
+    "CodeExecutor",
+    "BaseCommandLineCodeExecutor",
+    "lang_to_cmd",
+    "silence_pip",
+    "get_file_name_from_content",
+]

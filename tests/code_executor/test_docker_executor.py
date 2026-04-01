@@ -211,8 +211,8 @@ class TestDockerCommandLineCodeExecutorCancellation:
     """Tests for cancellation behavior (requires Docker)."""
 
     @pytest.mark.asyncio
-    async def test_cancellation(self) -> None:
-        """Test code execution can be cancelled."""
+    async def test_cancellation_raises_cancelled_error(self) -> None:
+        """Test code execution cancellation raises CancelledError."""
         async with DockerCommandLineCodeExecutor(image=TEST_IMAGE) as executor:
             token = CancellationToken()
 
@@ -224,8 +224,29 @@ class TestDockerCommandLineCodeExecutorCancellation:
             await asyncio.sleep(0.5)
             token.cancel()
 
-            result = await task
-            assert "cancelled" in result.output.lower() or result.exit_code != 0
+            # Should raise CancelledError per asyncio convention
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    @pytest.mark.asyncio
+    async def test_concurrent_cancellation_access(self) -> None:
+        """Test concurrent access to cancellation futures is safe."""
+        async with DockerCommandLineCodeExecutor(image=TEST_IMAGE) as executor:
+            token = CancellationToken()
+
+            # Create multiple concurrent executions
+            code_blocks = [CodeBlock(code="import time; time.sleep(10)", language="python") for _ in range(3)]
+
+            tasks = [asyncio.create_task(executor.execute_code_blocks([block], token)) for block in code_blocks]
+
+            # Cancel all at once
+            await asyncio.sleep(0.1)
+            token.cancel()
+
+            # All tasks should handle cancellation properly
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # All should be CancelledError
+            assert all(isinstance(r, asyncio.CancelledError) for r in results)
 
 
 class TestDockerCommandLineCodeExecutorConfig:
@@ -304,3 +325,69 @@ class TestDockerCommandLineCodeExecutorProperties:
         bind_path = tmp_path / "bind"
         executor = DockerCommandLineCodeExecutor(image=TEST_IMAGE, work_dir=tmp_path, bind_dir=bind_path)
         assert executor.bind_dir == bind_path
+
+
+@pytest.mark.docker
+class TestDockerCommandLineCodeExecutorClient:
+    """Tests for Docker client lifecycle."""
+
+    @pytest.mark.asyncio
+    async def test_docker_client_closed_on_stop(self) -> None:
+        """Test Docker client is closed when executor stops."""
+        executor = DockerCommandLineCodeExecutor(image=TEST_IMAGE)
+        await executor.start()
+        assert executor._client is not None
+        await executor.stop()
+        assert executor._client is None
+
+    @pytest.mark.asyncio
+    async def test_docker_client_recreated_on_restart(self) -> None:
+        """Test Docker client is recreated when executor restarts."""
+        executor = DockerCommandLineCodeExecutor(image=TEST_IMAGE)
+        await executor.start()
+        first_client = executor._client
+        await executor.stop()
+        await executor.start()
+        second_client = executor._client
+        # Should be different client instances
+        assert first_client is not second_client
+        await executor.stop()
+
+
+class TestDockerCommandLineCodeExecutorSecurity:
+    """Tests for security features."""
+
+    def test_init_command_injection_detection(self) -> None:
+        """Test that dangerous init_command characters are rejected."""
+        dangerous_commands = [
+            "echo; rm -rf /",
+            "echo && cat /etc/passwd",
+            "echo | cat",
+            "echo `whoami`",
+            "echo $(whoami)",
+            "echo ${PATH}",
+            "echo < file",
+            "echo > file",
+            "echo 'quoted'",
+            'echo "double quoted"',
+            "echo\nmalicious",
+        ]
+        executor = DockerCommandLineCodeExecutor(image=TEST_IMAGE)
+        for cmd in dangerous_commands:
+            try:
+                result = executor._validate_init_command(cmd)
+                pytest.fail(f"Expected ValueError for command: {cmd!r}, but got result: {result}")
+            except ValueError as e:
+                assert "dangerous character" in str(e), f"Unexpected error message: {e}"
+
+    def test_init_command_safe_characters_allowed(self) -> None:
+        """Test that safe init_command characters are allowed."""
+        safe_commands = [
+            "pip install requests",
+            "apt-get update",
+            "echo hello world",
+        ]
+        for cmd in safe_commands:
+            executor = DockerCommandLineCodeExecutor(image=TEST_IMAGE)
+            result = executor._validate_init_command(cmd)
+            assert result == cmd

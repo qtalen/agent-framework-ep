@@ -117,8 +117,8 @@ class TestCancellationToken:
         assert task.done()
 
     @pytest.mark.asyncio
-    async def test_cancellation_token_watcher_task_saved(self) -> None:
-        """Test that link_future saves watcher task to prevent garbage collection."""
+    async def test_cancellation_token_watcher_tasks_saved(self) -> None:
+        """Test that link_future saves watcher tasks to prevent garbage collection."""
         token = CancellationToken()
 
         async def long_running_task() -> str:
@@ -128,14 +128,55 @@ class TestCancellationToken:
         task = asyncio.create_task(long_running_task())
         token.link_future(task)
 
-        # Verify _watcher_task is saved
-        assert token._watcher_task is not None
-        assert isinstance(token._watcher_task, asyncio.Task)
-        assert not token._watcher_task.done()
+        # Verify _watcher_tasks is saved
+        assert len(token._watcher_tasks) > 0
+        assert isinstance(token._watcher_tasks[0], asyncio.Task)
+        assert not token._watcher_tasks[0].done()
 
         # Clean up
         token.cancel()
         await asyncio.sleep(0.1)
+
+    @pytest.mark.asyncio
+    async def test_cancellation_token_cleanup_cancels_watcher_tasks(self) -> None:
+        """Test that cleanup cancels all watcher tasks."""
+        token = CancellationToken()
+
+        async def long_running_task() -> str:
+            await asyncio.sleep(10)
+            return "completed"
+
+        task1 = asyncio.create_task(long_running_task())
+        task2 = asyncio.create_task(long_running_task())
+        token.link_future(task1)
+        token.link_future(task2)
+
+        # Cleanup should cancel watcher tasks
+        token.cleanup()
+        await asyncio.sleep(0.1)
+
+        # All watcher tasks should be cancelled
+        assert all(t.done() for t in token._watcher_tasks)
+
+    @pytest.mark.asyncio
+    async def test_cancellation_token_cleanup_safe_multiple_calls(self) -> None:
+        """Test that cleanup is safe to call multiple times."""
+        token = CancellationToken()
+
+        async def long_running_task() -> str:
+            await asyncio.sleep(10)
+            return "completed"
+
+        task = asyncio.create_task(long_running_task())
+        token.link_future(task)
+
+        # Multiple cleanup calls should not raise
+        token.cleanup()
+        token.cleanup()
+        token.cleanup()
+
+        # Should be empty after cleanup
+        assert len(token._watcher_tasks) == 0
 
 
 class TestLangToCmd:
@@ -243,12 +284,11 @@ class TestGetFileNameFromContent:
         result = get_file_name_from_content(code, tmp_path)
         assert result is None
 
-    def test_get_file_name_from_content_path_traversal(self, tmp_path: Path) -> None:
-        """Test get_file_name_from_content prevents path traversal."""
+    def test_get_file_name_from_content_path_traversal_raises(self, tmp_path: Path) -> None:
+        """Test get_file_name_from_content raises ValueError on path traversal."""
         code = "# filename: ../../etc/passwd\nprint('hello')"
-        result = get_file_name_from_content(code, tmp_path)
-        # Should not return the path traversal path
-        assert result is None or ".." not in result
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            get_file_name_from_content(code, tmp_path)
 
     def test_get_file_name_from_content_relative_path(self, tmp_path: Path) -> None:
         """Test get_file_name_from_content with relative path."""

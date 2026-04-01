@@ -92,8 +92,8 @@ print(f"Sum: {x + y}")
             assert "Timeout" in result.output
 
     @pytest.mark.asyncio
-    async def test_cancellation(self):
-        """Test cancellation via CancellationToken."""
+    async def test_cancellation_raises_cancelled_error(self):
+        """Test cancellation raises CancelledError per asyncio convention."""
         async with LocalCommandLineCodeExecutor(timeout=30) as executor:
             token = CancellationToken()
 
@@ -109,9 +109,9 @@ print(f"Sum: {x + y}")
             await asyncio.sleep(0.2)
             token.cancel()
 
-            result = await task
-            # Process was killed, so exit code should be non-zero
-            assert result.exit_code != 0
+            # Should raise CancelledError per asyncio convention
+            with pytest.raises(asyncio.CancelledError):
+                await task
 
     @pytest.mark.asyncio
     async def test_default_working_directory(self):
@@ -428,8 +428,8 @@ print(f"args: {sys.argv[1:]}")
             assert "Timeout" in result.output
 
     @pytest.mark.asyncio
-    async def test_execute_script_cancellation(self, tmp_path):
-        """Test script execution cancellation."""
+    async def test_execute_script_cancellation_raises_cancelled_error(self, tmp_path):
+        """Test script execution cancellation raises CancelledError."""
         custom_dir = tmp_path / "work"
         custom_dir.mkdir()
 
@@ -451,10 +451,9 @@ print(f"args: {sys.argv[1:]}")
             await asyncio.sleep(0.2)
             token.cancel()
 
-            result = await task
-            # Process was killed, so exit code should be non-zero
-            assert result.exit_code != 0
-            assert "cancelled" in result.output.lower()
+            # Should raise CancelledError per asyncio convention
+            with pytest.raises(asyncio.CancelledError):
+                await task
 
     @pytest.mark.asyncio
     async def test_execute_script_not_running(self, tmp_path):
@@ -484,3 +483,54 @@ print(f"args: {sys.argv[1:]}")
                     "not_a_file",
                     cancellation_token=CancellationToken(),
                 )
+
+    @pytest.mark.asyncio
+    async def test_execute_script_shlex_split_with_spaces(self, tmp_path):
+        """Test positional arguments with spaces using shlex.split."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        script_file = custom_dir / "shlex_script.py"
+        script_content = """
+import sys
+print(f"args: {sys.argv[1:]}")
+"""
+        script_file.write_text(script_content, encoding="utf-8")
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir) as executor:
+            # Pass argument with spaces in quotes
+            result = await executor.execute_script(
+                "shlex_script.py",
+                args={"": '"path with spaces/file.txt"'},
+                cancellation_token=CancellationToken(),
+            )
+            assert result.exit_code == 0
+            # Should be treated as a single argument
+            assert "path with spaces/file.txt" in result.output
+            # Should NOT be split into separate args
+            assert "'path'" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_execute_script_shlex_split_multiple_quoted(self, tmp_path):
+        """Test multiple quoted positional arguments using shlex.split."""
+        custom_dir = tmp_path / "work"
+        custom_dir.mkdir()
+
+        script_file = custom_dir / "shlex_script.py"
+        script_content = """
+import sys
+print(f"args: {sys.argv[1:]}")
+"""
+        script_file.write_text(script_content, encoding="utf-8")
+
+        async with LocalCommandLineCodeExecutor(work_dir=custom_dir) as executor:
+            # Pass multiple quoted arguments
+            result = await executor.execute_script(
+                "shlex_script.py",
+                args={"": '"file with spaces.txt" "another file.txt"'},
+                cancellation_token=CancellationToken(),
+            )
+            assert result.exit_code == 0
+            # Both files should appear as separate arguments
+            assert "file with spaces.txt" in result.output
+            assert "another file.txt" in result.output
